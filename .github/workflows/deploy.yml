@@ -39,7 +39,7 @@ jobs:
         working-directory: ./frontend
         run: npm run build
         env:
-          BASE_URL: ${{ secrets.API_GATEWAY_URL }}
+          NUTRITION_API_URL: ${{ secrets.API_GATEWAY_URL }}
           CI: false
 
       - name: Set up Node.js for Backend
