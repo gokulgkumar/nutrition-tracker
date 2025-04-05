@@ -126,7 +126,7 @@ function App() {
     setError('');
 
     try {
-      const response = await fetch(`${import.meta.env.NUTRITION_API_URL}/nutrition/meal-plans`, {
+      const response = await fetch(`${import.meta.env.VITE_NUTRITION_API_URL}/nutrition/meal-plans`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
