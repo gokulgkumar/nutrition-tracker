@@ -39,7 +39,7 @@ jobs:
         working-directory: ./frontend
         run: npm run build
         env:
-          NUTRITION_API_URL: ${{ secrets.API_GATEWAY_URL }}
+          VITE_NUTRITION_API_URL: ${{ secrets.API_GATEWAY_URL }}
           CI: false
 
       - name: Set up Node.js for Backend
