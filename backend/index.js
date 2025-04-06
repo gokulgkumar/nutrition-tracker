@@ -1,11 +1,10 @@
-// nutrition-planner-lambda/index.js
 const axios = require('axios');
 
 exports.handler = async (event) => {
   try {
     // Parse request body
     const body = event;
-    
+
     const { calories, dietaryPreference, adjustment = 0, includeWorkout = false } = body;
 
     // Basic validation
@@ -33,10 +32,10 @@ exports.handler = async (event) => {
     );
     const adjustedCalories = calories + adjustment + (totalCaloriesBurned * 0.8); // 80% of burned calories
 
-    // Generate meal plan
-    const mealPlan = generateMealPlan(
+    // Generate meal plan - Now async due to ingredient fetching
+    const mealPlan = await generateMealPlan(
       adjustedCalories,
-      dietaryPreference,
+      dietaryPreference, 
       foodData
     );
 
@@ -50,7 +49,7 @@ exports.handler = async (event) => {
 
     return formatResponse(201, mealPlan);
   } catch (error) {
-    console.error('Error:', error); // Kept console.error for debugging
+    console.error('Error:', error);
     return formatResponse(500, { error: 'Internal server error' });
   }
 };
@@ -60,23 +59,24 @@ async function getFoodData(dietaryPreference, targetCalories) {
     // Spoonacular API - Get Meal Plan
     const apiKey = process.env.SPOONACULAR_API_KEY;
     const diet = mapDietaryPreferenceToSpoonacular(dietaryPreference);
-        
+
     const url = `https://api.spoonacular.com/mealplanner/generate?apiKey=${apiKey}&timeFrame=day&targetCalories=${targetCalories}&diet=${diet}`;
 
     const response = await axios.get(url);
-        
+
     // Transform the response
     return transformSpoonacularResponse(response.data);
   } catch (error) {
-    console.error('Spoonacular API error:', error); // Kept console.error
-    // Return mock data if API fails
+    console.error('Spoonacular API error (getFoodData):', error); 
+    // Return mock data if API fails - including mock IDs for potential fallback
     return {
       meals: [
-        { name: 'Breakfast', options: ['Oatmeal', 'Smoothie', 'Avocado Toast'] },
-        { name: 'Lunch', options: ['Salad', 'Soup', 'Sandwich'] },
-        { name: 'Dinner', options: ['Pasta', 'Rice Bowl', 'Curry'] },
-        { name: 'Snack', options: ['Fruit', 'Nuts', 'Yogurt'] }
-      ]
+        { name: 'Breakfast', id: null, title: 'Oatmeal' }, 
+        { name: 'Lunch', id: null, title: 'Salad' }, 
+        { name: 'Dinner', id: null, title: 'Pasta' }, 
+        { name: 'Snack', options: [ 'Fruit', 'Nuts', 'Yogurt' ] } 
+      ],
+      nutrients: {}
     };
   }
 }
@@ -84,15 +84,15 @@ async function getFoodData(dietaryPreference, targetCalories) {
 // Map dietary preferences to Spoonacular API diet parameters
 function mapDietaryPreferenceToSpoonacular(preference) {
   const mapping = {
-    'balanced': 'balanced',
-    'high_protein': 'high-protein',
+    'balanced': '', 
+    'high_protein': 'high protein', 
     'keto': 'ketogenic',
     'vegetarian': 'vegetarian',
     'vegan': 'vegan',
     'paleo': 'paleo'
   };
-
-  return mapping[preference] || 'balanced';
+  // Return the mapped preference, default to empty string if not found
+  return mapping[preference] || '';
 }
 
 function transformSpoonacularResponse(data) {
@@ -100,18 +100,18 @@ function transformSpoonacularResponse(data) {
   const meals = data.meals || [];
   const nutrients = data.nutrients || {};
 
-  // Get meal names and IDs to fetch additional details if needed
-  const breakfast = meals.find(meal => meal.slot === 1) || { title: 'Breakfast' };
-  const lunch = meals.find(meal => meal.slot === 2) || { title: 'Lunch' };
-  const dinner = meals.find(meal => meal.slot === 3) || { title: 'Dinner' };
-    
-  // Include any options from Spoonacular's returned meals
+  // Find meals by slot and extract ID and Title
+  const breakfastData = meals.find(meal => meal.slot === 1);
+  const lunchData = meals.find(meal => meal.slot === 2);
+  const dinnerData = meals.find(meal => meal.slot === 3);
+
+  // Prepare the meal structure, including ID and Title
   return {
     meals: [
-      { name: 'Breakfast', options: [breakfast.title || 'Balanced Breakfast'] },
-      { name: 'Lunch', options: [lunch.title || 'Healthy Lunch'] },
-      { name: 'Dinner', options: [dinner.title || 'Nutritious Dinner'] },
-      { name: 'Snack', options: ['Fruit', 'Nuts', 'Yogurt'] } // Spoonacular doesn't always include snacks
+      { name: 'Breakfast', id: breakfastData?.id, title: breakfastData?.title || 'Balanced Breakfast' },
+      { name: 'Lunch', id: lunchData?.id, title: lunchData?.title || 'Healthy Lunch' },
+      { name: 'Dinner', id: dinnerData?.id, title: dinnerData?.title || 'Nutritious Dinner' },
+      { name: 'Snack', options: [ 'Fruit', 'Nuts', 'Yogurt' ] } // Keep snacks simple as before
     ],
     nutrients: nutrients // Keep the nutrient information for reference
   };
@@ -150,55 +150,60 @@ async function getWorkoutData(calories, dietaryPreference) {
   }
 }
 
-function generateMealPlan(calories, preference, foodData) {
+
+async function generateMealPlan(calories, preference, foodData) {
   // Generate meals based on preferences and calorie needs
-  const meals = [];
+  const mealPromises = []; 
   let remainingCalories = calories;
 
   // Breakfast (30% of calories)
   const breakfastCalories = Math.round(calories * 0.3);
   remainingCalories -= breakfastCalories;
-
-  const breakfast = generateMeal(
-    'Breakfast',
+  const breakfastMealData = foodData.meals[0]; 
+  mealPromises.push(generateMeal(
+    breakfastMealData.name,
     breakfastCalories,
     preference,
-    foodData.meals[0].options
-  );
-  meals.push(breakfast);
+    breakfastMealData.title,
+    breakfastMealData.id 
+  ));
 
   // Lunch (30% of calories)
   const lunchCalories = Math.round(calories * 0.3);
   remainingCalories -= lunchCalories;
-
-  const lunch = generateMeal(
-    'Lunch',
+  const lunchMealData = foodData.meals[1];
+  mealPromises.push(generateMeal(
+    lunchMealData.name,
     lunchCalories,
     preference,
-    foodData.meals[1].options
-  );
-  meals.push(lunch);
+    lunchMealData.title,
+    lunchMealData.id 
+  ));
 
   // Dinner (30% of calories)
   const dinnerCalories = Math.round(calories * 0.3);
   remainingCalories -= dinnerCalories;
-
-  const dinner = generateMeal(
-    'Dinner',
+  const dinnerMealData = foodData.meals[2]; 
+  mealPromises.push(generateMeal(
+    dinnerMealData.name,
     dinnerCalories,
     preference,
-    foodData.meals[2].options
-  );
-  meals.push(dinner);
+    dinnerMealData.title,
+    dinnerMealData.id 
+  ));
 
-  // Snack (10% of calories)
-  const snack = generateMeal(
-    'Snack',
+  // Snack (10% of calories) - Still uses options/fallback
+  const snackMealData = foodData.meals[3]; // { name, options }
+  mealPromises.push(generateMeal(
+    snackMealData.name,
     remainingCalories, // Use remaining calories for snack
     preference,
-    foodData.meals[3].options
-  );
-  meals.push(snack);
+    snackMealData.options[Math.floor(Math.random() * snackMealData.options.length)], // Select random snack option
+    null 
+  ));
+
+  // Await all meal generation promises
+  const meals = await Promise.all(mealPromises);
 
   return {
     meals,
@@ -206,43 +211,48 @@ function generateMealPlan(calories, preference, foodData) {
   };
 }
 
-function getDefaultIngredients(mealType, preference) {
-  // Mock ingredients based on meal type and preference
-  if (mealType === 'Breakfast') {
-    if (preference === 'vegetarian' || preference === 'vegan') {
-      return ['oats', 'almond milk', 'banana', 'chia seeds', 'berries'];
-    } else if (preference === 'keto') {
-      return ['eggs', 'avocado', 'spinach', 'feta cheese'];
-    } else {
-      return ['eggs', 'whole grain bread', 'avocado', 'tomatoes'];
-    }
-  } else if (mealType === 'Lunch' || mealType === 'Dinner') {
-    if (preference === 'vegetarian') {
-      return ['quinoa', 'bell peppers', 'chickpeas', 'feta', 'olive oil'];
-    } else if (preference === 'vegan') {
-      return ['brown rice', 'tofu', 'broccoli', 'carrots', 'soy sauce'];
-    } else if (preference === 'keto') {
-      return ['chicken breast', 'cauliflower rice', 'broccoli', 'cheese'];
-    } else {
-      return ['chicken breast', 'brown rice', 'broccoli', 'olive oil'];
-    }
-  } else { // Snack
-    if (preference === 'vegetarian' || preference === 'vegan') {
-      return ['almonds', 'apple', 'peanut butter'];
-    } else if (preference === 'keto') {
-      return ['string cheese', 'beef jerky'];
-    } else {
-      return ['greek yogurt', 'honey', 'granola'];
-    }
+async function getIngredientsForMeal(mealId) {
+  // If no valid mealId (e.g., from fallback or snack), return empty array
+  if (!mealId) {
+    return [ 'Ingredient details not available' ];
+  }
+
+  try {
+    const apiKey = process.env.SPOONACULAR_API_KEY;
+    // Use the Recipe Information endpoint which includes ingredients
+    const url = `https://api.spoonacular.com/recipes/${mealId}/information?apiKey=${apiKey}&includeNutrition=false`;
+
+    const response = await axios.get(url);
+    const ingredients = response.data?.extendedIngredients || [];
+
+    // Return a simple list of ingredient descriptions (e.g., "1 tbsp olive oil")
+    return ingredients.map(ing => ing.original); // 'original' usually gives amount+unit+name
+
+  } catch (error) {
+    console.error(`Spoonacular API error (getIngredientsForMeal ${mealId}):`, error.response?.data || error.message);
+    // Fallback if the API call fails for a specific meal
+    return [ 'Could not fetch ingredients' ];
   }
 }
 
-function generateMeal(mealType, calories, preference, options) {
-  // Select a random meal option from available options
-  const selectedOption = options[Math.floor(Math.random() * options.length)];
+// Modified to fetch ingredients via API
+async function generateMeal(mealType, calories, preference, selectedOption, mealId) {
+  let ingredients = [];
 
-  // Get default ingredients based on meal type and preference
-  const ingredients = getDefaultIngredients(mealType, preference);
+  // Fetch ingredients from API if mealId is provided (i.e., for Breakfast, Lunch, Dinner)
+  if (mealId) {
+    ingredients = await getIngredientsForMeal(mealId);
+  } else {
+    // Fallback for snacks or if mealId wasn't available (e.g., API error in getFoodData)
+    // Using a simple placeholder or could use preference for basic suggestion
+    switch (mealType) {
+    case 'Snack':
+      ingredients = [ `${selectedOption} (approx. ${calories} kcal)` ];
+      break;
+    default:
+      ingredients = [ 'Ingredient details unavailable' ];
+    }
+  }
 
   return {
     meal: selectedOption,
