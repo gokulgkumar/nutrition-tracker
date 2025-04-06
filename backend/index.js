@@ -101,9 +101,9 @@ function transformSpoonacularResponse(data) {
   const nutrients = data.nutrients || {};
 
   // Find meals by slot and extract ID and Title
-  const breakfastData = meals.find(meal => meal.slot === 1);
-  const lunchData = meals.find(meal => meal.slot === 2);
-  const dinnerData = meals.find(meal => meal.slot === 3);
+  const breakfastData = meals[0];
+  const lunchData = meals[1];
+  const dinnerData = meals[2];
 
   // Prepare the meal structure, including ID and Title
   return {
@@ -212,25 +212,26 @@ async function generateMealPlan(calories, preference, foodData) {
 }
 
 async function getIngredientsForMeal(mealId) {
-  // If no valid mealId (e.g., from fallback or snack), return empty array
   if (!mealId) {
     return [ 'Ingredient details not available' ];
   }
 
   try {
     const apiKey = process.env.SPOONACULAR_API_KEY;
-    // Use the Recipe Information endpoint which includes ingredients
-    const url = `https://api.spoonacular.com/recipes/${mealId}/information?apiKey=${apiKey}&includeNutrition=false`;
+    const url = `https://api.spoonacular.com/recipes/${mealId}/ingredientWidget.json?apiKey=${apiKey}`;
 
     const response = await axios.get(url);
-    const ingredients = response.data?.extendedIngredients || [];
+    const ingredients = response.data?.ingredients || [];
 
-    // Return a simple list of ingredient descriptions (e.g., "1 tbsp olive oil")
-    return ingredients.map(ing => ing.original); // 'original' usually gives amount+unit+name
+    return ingredients.map(ing => {
+        const amount = ing.amount?.us?.value || '';
+        const unit = ing.amount?.us?.unit || '';
+        const name = ing.name || 'Unknown ingredient';
+        return `${amount} ${unit} ${name}`.trim();
+    });
 
   } catch (error) {
     console.error(`Spoonacular API error (getIngredientsForMeal ${mealId}):`, error.response?.data || error.message);
-    // Fallback if the API call fails for a specific meal
     return [ 'Could not fetch ingredients' ];
   }
 }
